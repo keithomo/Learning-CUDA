@@ -38,7 +38,7 @@ Do I need to put the coding reference books I used in here like " Cuda By Exampl
 09: http://developer.download.nvidia.com/compute/cuda/1.1-Beta/x86_website/projects/histogram64/doc/histogram.pdf
 	
 10: http://www.columbia.edu/~ld208/psymeth97.pdf. Look at for better understanding of Kurtosis.
-
+ 
 11: http://www.itl.nist.gov/div898/handbook/eda/section3/eda35b.htm.  Measures of Skewness and Kurtosis.
 
 12: "Cuda By Example". Say how I am using the histo_kernel function which is generic cuda, but not my original code either.
