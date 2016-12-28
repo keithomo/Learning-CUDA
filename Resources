@@ -1,0 +1,44 @@
+RESOURCES:
+
+
+Here are the resources I have obtained to help me with my Undergraduate Research Experience project. The format for this resource page shall be:
+
+Author, Title, type of media, address to material, use of material related to my project.
+
+
+01: Lyons, Richard. "Quadrature Signals: Complex, But Not Complicated". Essay. /komogros/Downloads/Lyons_Quadrature_Richard_Lyons.Signals. This reference helped me visualize the importance of the quadrature signal in digital signal processing as the time continuous signal is being sampled by the ADC. This essay helped me understand how a signal can have two real components that can be broken up into the 'inphase' and 'quadrature' phases that are orthogonal to eachother. This means that a signal going into the ADC from two components at one time had rotational polarization. 
+
+02: Lyons, Richard. "Understanding Digital Signal Processing". Book. < no address, hard back physical book >. This book is continually helping me understand the complex process of DSP. I have just learned about aliasing and about intermediate frequencies when the original frequency is modulated to a frequency centered around 0 Hz.
+
+03: Ellingson, Steve. {
+	/home/groups/rfi/GUPPI_Raw_Data_Format/src. Original plotting code
+	/home/groups/rfi/frsc-master. Sophisticated plotting code
+	
+	
+	
+	
+	Many code files to process the data of which I need to imporve upon. These files were instrumental in learning the structure of the data and in learning the methods of which I could flag the data.
+
+04: Prestage, Richard {
+	/home/pulsar64/guppi/guppi.csh
+	
+
+05: The Theano Development Team. "Theano: A Python framework for fast computation of mathematical expressions". Paper. http://arxiv.org/pdf/1605.02688v1.pdf This paper provides insight to Theano. It is used to compare Theano to Thrust and Cuda in my Trade Study.
+
+06: Phoxis. "Generating Random Numbers From Normal Distribution in C". Blog. https://phoxis.org/2013/05/04/generating-random-numbers-from-normal-distribution-in-c/. This is providing me a tool to debug my cuFFT code I am writing.
+
+Do I need to put the coding reference books I used in here like " Cuda By Example" or "Understanding Digital Signal Processing" or "C A Reference Manual"?
+
+07: http://prod.sandia.gov/techlib/access-control.cgi/2008/086212.pdf
+	continuous calculation of n-order central moments
+
+08: http://www.rms-group.org/rms_papers/tamug_papers/mk/efficient_moments_2010.pdf
+	histogram statistics
+
+09: http://developer.download.nvidia.com/compute/cuda/1.1-Beta/x86_website/projects/histogram64/doc/histogram.pdf
+	
+10: http://www.columbia.edu/~ld208/psymeth97.pdf. Look at for better understanding of Kurtosis.
+
+11: http://www.itl.nist.gov/div898/handbook/eda/section3/eda35b.htm.  Measures of Skewness and Kurtosis.
+
+12: "Cuda By Example". Say how I am using the histo_kernel function which is generic cuda, but not my original code either.

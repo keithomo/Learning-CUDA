@@ -1,0 +1,50 @@
+
+Notes on the GUPPI Raw Data Format
+S. Ellingson
+Nov 1, 2013
+
+This format consists of blocks, with each block consisting of a text header and a raw binary data segment.
+
+An example of a header is shown in the file "header_example.txt".  The header ends with the word "END".  Some important fields are:
+OBSFREQ: [MHz] center of the RF passband                                                 
+OBSBW: [MHz] width of passband; negative sign indicates spectral flip                                                  
+OBSNCHAN: Number of channels (subbands)                                                  
+NPOL: Number of polarizations times 2.  For example, NPOL=4 means 2 polarizations.  
+NBITS: Number of bits per I or Q value.  So, one complex-valued sample has 2*NBITS bits  
+TBIN: [s] sample period within a channel                                                                                 
+CHAN_BW [MSPS] sample rate for a channel.  Negative sign indicates spectral flip.                                                    
+OVERLAP: This many samples per subband from the previous data block are repeated at the beginning of this data block.                                                
+BLOCSIZE: The size of the raw data segment in bytes.  
+
+The center frequency of channel i (where i is in [1..OBSNCHAN]) is OBSFREQ - OBSBW/2 + (i-0.5)*CHAN_BW [MHz].
+
+Pseudocode describing the structure of the raw data block is as follows:
+--- begin ----
+for channel=1..OBSNCHAN,
+  for nsamples=1..NDIM,
+    for polarization=1..(NPOL/2)
+       write I, Q
+--- end ---
+Above, NDIM is the number of samples per channel in the block; i.e., BLOCSIZE/(OBSNCHAN*NPOL*(NBITS/8)).  This *includes* overlap bits.
+For NBITS=8, the samples are "signed char".
+
+For the one and only dataset I've worked with so far (identified below):
+----
+OBSFREQ = 1378.125
+OBSBW = -200
+OBSNCHAN = 32
+NPOL = 4
+NBITS = 8
+TBIN = 1.6E-07
+CHAN_BW = -6.25
+OVERLAP = 512
+BLOCKSIZE=1073545216
+----
+In this case, NDIM = 8387072 and the time span covered by a raw data block is NDIM*TBIN = 1.3419 s.  Keep in mind, however, that this 1.3419 s span overlaps with the next block by 512 samples. This means the time without the overlap of 512 samples is (NDIM - 512)*TBIN = 1.3418 s. 
+
+As an example, src/rg.c is C source code which reads a single header + raw data block from a GUPPI raw data file, extracts one channel, and writes it back out as time and spectra.  (See the source code for compiling instructions and usage.) The script src/a.sh runs "rg" repeatedly to obtain the output for all channels.  src/a.gp is a Gnuplot script which reads these files and plots the entire bandpass, including all channels. 
+
+"guppi.png" is the output when the above code is applied to the file "guppi_56465_J1713+0747_0006.0000.raw" (NRAO folks: /lustre/pulsar/scratch/1713+0747_global/raw).  For this particular dataset there is a large DC offset in each channel, which accounts for the spike in the center of each channel bandpass.  In this output, channel 1 is on the right and channel 32 is on the left.
+
+Thanks to Paul Demorest for helping me figure this out.
+

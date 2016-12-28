@@ -1,0 +1,91 @@
+
+Radio Frequency Interference Characerization On Guppi (RCOG)
+Keith Omogrosso, National Radio Astronomy Observatory (NRAO), komogros@nrao.edu
+September 02, 2016
+
+Introduction
+=====================================
+	RCOG is a GPU accelerated RFI flagging program which is the result of my undergraduate summer student project. I wrote the entire program myself with the support of the NRAO staff here at Green Bank, most notably Richard Prestage, Joe Brandt, Randy McCullough, and Ramon Creager. This project was made possible by the massive raw guppi data files that contain discrete voltages at a very high time resoultion I had to work with. These files were also a source of data that Steve Ellingson of Virginia Tech used with his RFI characterization program called FRSC. RCOG and FRSC are similar because they both produce similar sets of statistics from the same set of data. FRSC (2014) was used as a learning platform to understand the raw guppi format, and from there these two programs diverge. 
+	RCOG is comprised of 3 parts. (1) raw gupppi data reader. (2) the cuFFT. (3) the statistics. The output is one spectrogram and one statistics file per channel. From here another program can combine the statistics to flag the spectrogram.
+	This directory is comprised not only of RCOG but also of some test programs I had to make in order to learn the cuda I needed for this project. Below is a description of each program and all of the files associated with it. This directory is intended as a learning resource for future summer students working with CUDA.
+
+TABLE OF CONTENTS
+=====================================
+1. rcog_scypi_hist
+2. rcog_rsk
+3. rcog_stat_streams
+4. guppi_to_device
+5. just_gupp_data
+6. pfifout and pfifin
+7. Makefile_out and Makefile_in
+8. Makefile
+...
+
+
+
+rcog_scypi_hist
+=====================================
+	My first program to use the histogram method. After writing the code for the histogram method, I needed a way to test the accuracy of my statistics. To test accuracy, I compared my values for a variety of well known distributions against the statistics of scypi. I generated random values of a given distribution in python as floats and then processed that array of floats in both python an in my program. I did not get accurate results. I realized that this is because of my histogramming.
+	GUPPI data is in signed char form. Since char has a size of 256, histogramming any char into 256 bins would be easy and perfectly accurate. However binning a float which has a size 2^4 times greater than that would be less accurate. I needed a way to make binning floats more accurate. This is where I took the histogram generated from scipy and copy pasted it into my code. I did this because I did not known if my binning of float values was correct. I realized when writing this code, that in order to get statistics that we farily accurate, I needed to resize my histogram based on the range of each data set. The next program will have histograms where I will find the max and min and the range. All three of these values are used to resize my histogram so I get more accurate results. Without resizing, the histogramming method is far to inaccurate to be useful.
+
+
+
+rcog_rsk
+=====================================
+	Rsk is an acronym for rms, skew, and kurtosis. This program produces these statistics from lots of data in one stream. In this version of my statistics, I have refined the histogramming method. I know it is accurate. Also, these statistics of rms, skew, and kurtosis are calculated in the gpu for all time samples of 10 ms. Also this program is particularly useful because this is the first program to have an efficient moment calculation kernel. This is because lots of data needs to accumulate before this kernel can really be effective by being calculated on the GPU. 
+
+
+
+rcog_stat_streams
+=====================================
+	This program was designed at the same time as rcog_rsk. It produces statistics from one time sample at a time per stream with 8 streams asynchronous. This program was just to prove that streaming would work. If you want a good streaming basic example, look at this. Even though streams are efficient, this program makes poor use of the streams for they are inefficient in how they are used. This program was just to prove streaming would work. 
+
+
+
+guppi_to_device 
+=====================================
+This program you can change the size of the FFT and have it done for either x or y polarization. Produces a spectrogram. My first successful standalone FFT.
+
+
+
+just_gupp_data
+======================================
+This program was essential for all of my code development up until the end. This program takes raw GUPPI format data from disk and extracts only one contiguous channel instead of being interrupted by the packetting format. This made all of my programs easier to debug. The out put is a file containing a single channel for a file. 
+
+
+
+pfifout and pfifin
+======================================
+These two programs demonstrate the use of FIFOs (first in first out) or "named pipes). pfifout is a very simple program that send 'N' amount of floats to pfifin. Use of FIFOs are a little tricky to those who do not know what they are. pfifout opens one side of the pipe, but it cannot continue until another program opens the other side of the pipe. Once both programs have been compiled input the following commands.
+
+$ pfifout &
+$ pfifin
+
+This will start the first program and allow you to still have command of the terminal window. If you do not use the '&' then you will have to open a new terminal window to run the second program.
+
+
+
+Makefile_out and Makefile_in
+======================================
+These are two different Makefiles. As you may guess, Makefile_out is the makefile for pfifout and Makefile_in is the makefile for pfifin. Both of these Makefiles are very simple c++ makefiles. In Linux, the make command searches in the current directory first for a file named 'makefile' and secondly named 'Makefile'. If the make command does not see either then you get an error and nothing gets built. However, if your makefile has a name other than 'Makefile' or 'makefile', then you must add some commands to the end of the make command to build your code. SYNOPSIS: make [ -f makefile ] [ options ] ... [ targets ] ... [-f] option means search for file. [ target ] is the name of your nonstandard makefile.
+
+$ make -f Makefile_out
+or 
+$ make -f Makefile_in
+
+
+
+Makefile
+======================================
+This makefile is a cuda makefile. It only works on this system of computers and with flag2 or srbs-hpc1 or any NVIDIA GPU with the same computecap. 
+
+
+
+
+
+
+
+
+
+
+
