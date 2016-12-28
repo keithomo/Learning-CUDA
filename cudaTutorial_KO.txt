@@ -1,0 +1,472 @@
+
+------------------------------------- ALL ABOUT CODING IN CUDA ------------------------------------------
+----------------------------------------- by Keith Omogrosso --------------------------------------------
+	-------------------------------- not to be published ----------------------------------
+
+
+
+						Abstract:
+
+
+
+	This is for explaining my CUDA program RCOG to someone who has not much experience with CUDA but does have experience with C/C++.
+
+
+
+						Introduction:
+
+
+
+	GPU( graphics processing units) utilize parallization to update graphics on a computer ver quickly. Traditionally, GPUs have only been userd for graphics exclusively, however, around the trun of the century, people realized that GPUs could be powerful computational engines. This is where the language of CUDA comes into play. I will teach you what I had to learn in order to create my program RCOG ( RFI characterization on GUPPI) that I designed for the Green Bank Observatory. Hopefully this documentation will accelerate your learning of using CUDA. If ever you are stuck on a concept or functionality, please refer to my teachers: "CUDA BY EXAMPLE" by Jason Sanders and Edwared Kandrot, and the standard CUDA documentation and support by NVIDIA. I will be making frequent references to that book "CUDA BY EXAMPLE" by page number.
+	It is important to know when something is going to be the same or faster speed executed on the CPU and when something is going to be majorly accelerated from being executed in the GPU. This comes down to what a lot of data processing is. Do you have to do one thing to 64 K elements? Do it on the GPU. Do you have to do a whole bunch of things sequentially? Do it on the CPU. Why on the CPU? Because doing work on the GPU first requires the data to be present on the GPU. If the data is not on the GPU yet, time is wasted transfering the data to and from the GPU. This brings up a good point. If the data can be processed at the same speed on the CPU as it can on the GPU, and data is already on the GPU, then you might as well perform the work on the GPU since the data is already there. 
+	How to use the GPU efficiently? In my program RCOG, millions of data elements are being transfered from the CPU to the GPU. The GPU does several calculations to each of the data elements. That data is then transfered back to the CPU. These calculations are performed several orders of magnitude faster on the GPU than the CPU. In this case, (time for data transfer + time for calculation execution on the GPU) << (time for calculation execution on the CPU). A good explanation and visual of types of calculations best done on the GPU can be found in "CUDA BY EXAMPLE" on pages # 38-46.
+
+
+
+					A Brief Lesson on CUDA:
+
+
+	A barebones CUDA program has host memory (CPU) which needs to be transfered to device memory (GPU) before the GPU can perform work on any set of data. Once in device memory, device and global kernel calls can be made to perform work. Once work has been performed on the data by the GPU, the data needs to be transfered back over to the host. At the end of the program, allocations need to be freed. 
+	There are multiple topics relating to GPUs and CUDA. Here is the order in which I will talk about them.  Blocks and threads, kernel functions and calls, atomics, global and shared memory, necessary cuda functions, time keeping, streaming, device limitations...
+
+Blocks and Threads:
+	The CPU basically can only do one thing at a time. Everything is sequential. The CPU can actually do a few different things at a time thanks to mulicores and threading. The GPU blows that out of the water by orders of magnitude for it can do billions of things at once. How? The GPU is comprised of multiprocessors that control blocks (sometimes called threadblocks). Each block is comprised of threads. Every thread can do a different thing. So if a GPU had 16 multiprocessors and 2 billion blocks and 1 thousand threads, the gpu can do (2 billion * 1 thousand) things controlled by up to 16 multiprocessors. If you do not know what multiprocessors are, then do not worry, it doesn't matter to you right now. That means in this hypothetical situation the gpu can do 1 trillion calculations at once! To find out how many, scroll to the bottom of this document. 
+
+Kernels:
+	Global functions can be called from host functions or device functions that execute device functions. Device functions can be called only from device functions that execute device functions. It is not possible to call host functions (like math library functions) within either global or device functions ( luckly for math, NVIDIA has a library of its own device math functions usually prefixed with 'f' ). Global functions have "__global__" infront of the function definition and or declaration. Device functions have "__device__" infront of the function definition or declaration. Look at the following sudo code for clarification:
+__________________________________________________________________________________________
+__device__ void function2() // this is a device funciton on device
+{
+	// do more work
+}
+	
+__global__ void function1() // this is a global function on device
+{
+	// do work
+	function2(); // right
+}
+
+int main() // on host
+{
+	dim3 grd (1);
+	dim3 blk (1);
+	function1<<<grd,blk>>>(); // right
+	function2<<<grd,blk>>>(); // wrong
+	return 0;
+}
+__________________________________________________________________________________________
+
+	Look at function1<<<grd,blk>>>. <<<,>>> determine how many blocks and threads you want to execute your function. The first variable 'grd' is a special cuda type of dim3 (like int or char or...). grd is how many blocks I want to have executing my function. blk is how many threads I want to have executing my function. In this instance, I am having one thread from one block execute my function. grd*blk = 1 pass through my function. I do not need to have grd or blk either. I can hard code by doing function1<<<4,7>>>();. This means I want 7 threads from 4 blocks to execute the function 4*7 = 28 passes through my function, 28 threads, one thread for each pass. Well great, if I did <<<4,7>>> it would be doing the same thing 28 times! You are right, not very useful. Lets show you an example of the right way to use blocks and threads:
+__________________________________________________________________________________________
+#define N 16
+
+__global__ void increm( int *a)
+{
+	a[blockIdx.x]++;
+}
+
+int main()
+{
+	dim3 grd(N);
+	dim3 blk(1);
+	int h_a[N];
+	int *d_a;
+
+	// initialize h_a
+	for (int ii = 0; ii < N; ii++)
+	{
+		h_a[ii] = 0;
+	}
+	
+	cudaMemcpy(d_a, h_a, N*sizeof(int), cudaMemcpyHostToDevice);
+	increm<<<grd,blk>>>(d_a);
+	cudaMemcpy(h_a, d_a, N*sizeof(int), cudamemcpyDeviceToHost);
+	
+	// print the result
+	for (int ii = 0; ii < N; ii++)
+	{
+		printf("%d\n", h_a[ii]);
+	}
+	return 0;
+} 
+__________________________________________________________________________________________
+
+	Now we are committing 16 blocks with 1 threads a piece to work on the kernel global function. 16*1 = 16 threads. Previously this would have ment that the global function would have run the same all 16 times. "blockIdx.x" is a predefined variable that the CUDA runtime defines for us. Every block committed to running this function has a label on it. 0, 1, 2, ... N. So the first block will increment a[0]. The second block will increment a[1], etc... Here is a more complicated example. I hope simple math is not too much for this reader, lol. 
+ __________________________________________________________________________________________
+#define N 16
+
+__global__ void increm( int *a)
+{
+	int idx = (blockIdx.x * blockDim.x) + threadIdx.x;
+	a[idx]++;
+}
+
+int main()
+{
+	dim3 grd(N/4);
+	dim3 blk(4);
+	int h_a[N];
+	int *d_a;
+
+	// initialize h_a
+	for (int ii = 0; ii < N; ii++)
+	{
+		h_a[ii] = 0;
+	}
+	
+	cudaMemcpy(d_a, h_a, N*sizeof(int), cudaMemcpyHostToDevice);
+	increm<<<grd,blk>>>(d_a);
+	cudaMemcpy(h_a, d_a, N*sizeof(int), cudamemcpyDeviceToHost);
+	
+	// print the result
+	for (int ii = 0; ii < N; ii++)
+	{
+		printf("%d\n", h_a[ii]);
+	}
+	return 0;
+} 
+__________________________________________________________________________________________
+	Here we can see that N is still 16, but grd is now 4 and so is blk. This means that our kernel call is going to launch the function with 4 blocks each with 4 threads. 4*4 = 16 threads. BlockDim.x is the size of how many threads per block you are launching. In this instance BlockDim.x = 4 because you are launching 4 threads per block. Idx is the indexer. So block 0 thread 0 has an idx = 0. Block 0 and thread 1 has an idx = 1. Block 1 thread 1 has an idx = 5; ((1*4) + 1). Ok this indexing makes sense based on what blocks and threads I am using, but what is the '.x' thing in threadIdx.x? Here is your answer:
+ __________________________________________________________________________________________
+#define N 16
+
+__global__ void increm( int *a)
+{
+	int idx = (threadIdx.x * blockDim.y) + threadIdx.y;
+	a[idx]++;
+}
+
+int main()
+{
+	dim3 grd(1);
+	dim3 blk(4,4,1);
+	int h_a[N];
+	int *d_a;
+
+	// initialize h_a
+	for (int ii = 0; ii < N; ii++)
+	{
+		h_a[ii] = 0;
+	}
+	
+	cudaMemcpy(d_a, h_a, N*sizeof(int), cudaMemcpyHostToDevice);
+	increm<<<grd,blk>>>(d_a);
+	cudaMemcpy(h_a, d_a, N*sizeof(int), cudamemcpyDeviceToHost);
+	
+	// print the result
+	for (int ii = 0; ii < N; ii++)
+	{
+		printf("%d\n", h_a[ii]);
+	}
+	return 0;
+} 
+__________________________________________________________________________________________
+	This is different. blk has 3 parameters in it: blk(4,4,1). The GPU has 3 dimensions of threads and 3 dimensions of blocks this means there are 9 dimensions total... kinda. A great graphic to reference is on page 71 of "CUDA BY EXAMPLE". You can figure out what this does based on previous examples and the book.
+
+
+Atomics:
+	In the last example, we saw one thread increment one element from an array by one. This thread was the only thread that operated on this element of the array; idx made sure of that. What happens though, if we have multiple threads trying to increment the same variable? It may not be what you expect. Look at this example with two threads trying to increment the same variable. Complements of "
+-------
+1. thread A reads the value of x.      	              	|  	A read 7 from x
+2. thread A adds 1 to the value it read.		|  	A computes 8.
+3. thread A writes the result back to x.		|	x <- 8
+4. thread B reads the value of x.			| 	B reads 8 from x
+5. thread B adds 1 to the value it read.		| 	B computes 9.
+6. thread B writes the result back to x.		|  	x <- 9
+-------
+Sure this works! But this is only one possible way it could go. Since these threads are working in parallel not sequentially as the previous example assumes, things could go much differently. This is what is more likely to happen:
+------
+1. thread A reads the value of x.      	              	|  	A read 7 from x
+2. thread B reads the value of x.			| 	B reads 7 from x
+3. thread A adds 1 to the value it read.		|  	A computes 8.
+4. thread B adds 1 to the value it read.		| 	B computes 8.
+5. thread A writes the result back to x.		|	x <- 8
+6. thread B writes the result back to x.		|  	x <- 8
+------
+We were expecting 9 to be the variable, but we got 8 instead. This is unreliable. So how do we avoid this? One option is to avoid having two threads work on the same variable, or you can use functions to control their actions. These are called atomic functions. Atomic functions like atomicAdd(addressA, x[idx]) blocks all access to the variable stored at address to all but one thread until the R/W is complete. In the case of atomicAdd(addressA, x[idx]), all elements of the array x are being added to whatever is at addressA one thread at a time to prevent discrepencies and race conditions explained in the two examples above.
+
+
+Global memory and Shared Memory and registers:
+	Here is a reference: http://www.icl.utk.edu/~mgates3/docs/cuda.html
+	There are three basic forms of memory on the GPU. Global memory is the normal for of memory on the GPU. This is also the largest form of memory that resides on the GPU. This can be anywhere from 1GiB to 10 GiB. Global memory can be accessed by any thread and any block. Global memory has a lifetime of application. Shared memory is much more limited in size. Shared memory has a lifetime of block. Shared memory can be accessed on by threads of the same block. If the GPU has 64K blocks, then that means that there are 64K places for separate shared memory. Another way of looking at it is if I declare a variable as shared memory, it can only be accessed by threads in its own block. Threads from other blocks cannot access it. That can be good or bad. R/W to and from shared memory is significantly faster than R/W to and from global memory. Registers are similar to shared memory, but they are only accessable by one thread in a block. Another difference is registers are reserved for variables of small size. Here are some examples of the differences: 
+__________________________________________________________________________________________
+__global__  
+void Histo_kernel( float2 *m2, int2 *histo, int2 *mi, float2 *resizer){
+	__shared__ int2 tempH[256];
+	tempH[threadIdx.x] = make_int2(0., 0.);
+	__syncthreads();
+	int idx = threadIdx.x + (blockIdx.x*blockDim.x);
+	int jump = floorf((blockIdx.x*blockDim.x)/samp_T0); // what time sample each threadblock is in.
+	for (int zz = 0; zz < nT0; zz++){
+		if (jump == zz){
+			atomicAdd(&tempH[(int)((m2[idx].x-mi[zz].x)/resizer[zz].x )].x,1);
+			atomicAdd(&tempH[(int)((m2[idx].y-mi[zz].y)/resizer[zz].y )].y,1); 
+			__syncthreads();
+			atomicAdd( &(histo[threadIdx.x + zz*256].x), tempH[threadIdx.x].x);
+			atomicAdd( &(histo[threadIdx.x + zz*256].y), tempH[threadIdx.x].y);
+		}
+	}
+}
+
+int main()
+{
+	dim3 pwrgrd(65536);
+	dim3 hist(256);
+	// other variable declarations, allocations, and copies
+	Histo_kernel<<<pwrgrd,hist>>>(d_m2, d_histo, d_mi, d_resizer); 
+	// memory copies and frees
+	return 0 ;
+}
+__________________________________________________________________________________________
+	This is part of my code from RCOG. This function Histo_kernel takes some data at m2 and puts it into a histogram at histo. Do not worry about the other variables. First, this is a __global__ function which means it can be called from both the host (aka main or other CPU function) and device (aka another global or device funciton). temp[256] is part of shared memory. The kernel is launched by 65536 blocks. This means that there are 65536 instantiations of the variable tempH[256]. Each block gets their own private variable. This speeds up the reduction proccess. Reductions suck on the GPU btw. What this allows us to do is break 65536*256 data elements into 65536 bins to speed up the binning process by just under 256 times! It proceeds to add each histogram together atomically. Atomic actions work when addressing to global memory from shared memory aswell. One thing of note is __syncthreads(); This function is a global function that stops all threads until all threads are to the same point in the code. This is important if you are going to have different threads working on the same data at different points in the code. Who knows if one thread is a fast runner and the other is still on the treadmill! Here is an example of registers:
+__________________________________________________________________________________________
+__global__
+void Max_min(float2 *m2, int2 *ma, int2 *mi, float2 *resizer) // slowest kernel
+{ 
+	int idx = ((blockIdx.x * blockDim.x) + threadIdx.x) * 256;
+	int threadMx = 0;
+	int threadMy = 0;
+	int threadmx = 0;
+	int threadmy = 0;
+	for (int ii = 0; ii < 256; ii++){
+		if (threadMx < m2[idx + ii].x){threadMx = (int)m2[idx + ii].x;}
+		if (threadMy < m2[idx + ii].y){threadMy = (int)m2[idx + ii].y;}
+		if (threadmx > m2[idx + ii].x){threadmx = (int)m2[idx + ii].x;}
+		if (threadmy > m2[idx + ii].y){threadmy = (int)m2[idx + ii].y;}
+	}
+	__syncthreads();
+	atomicMax( &ma[blockIdx.x].x, threadMx);
+	atomicMax( &ma[blockIdx.x].y, threadMy);
+	atomicMin( &mi[blockIdx.x].x, threadmx);
+	atomicMin( &mi[blockIdx.x].y, threadmy);
+	__syncthreads();
+	if (idx == blockIdx.x*blockDim.x*256){ //1.001 just to make division work later
+		resizer[blockIdx.x].x = ((float)(ma[blockIdx.x].x - mi[blockIdx.x].x)/hist_size)*1.001; 
+		resizer[blockIdx.x].y = ((float)(ma[blockIdx.x].y - mi[blockIdx.x].y)/hist_size)*1.001; 
+	}
+}
+__________________________________________________________________________________________
+	This is just a global funciton. Here the registers are threadMx and the other three like it. Each thread has its own variable of threadMx. Each pass through the  for loop, it searches for the maximum value. This thread has no contension with other threads over accessing the memory of threadMx, for threadMx is exclusive to its self. atomicMax() is another atomic function returns the max one thread at a time to avoid thread contension. Yes atomic functions also work for registers. 
+
+
+Time Keeping:
+	Here is how you keep time in ms in cuda. It is easier if I just go straight into an example:
+__________________________________________________________________________________________
+int main()
+{
+	float elapsedTime = 0;			// variable to hold time difference
+	static cudaEvent_t start, stop;		// variables to hold start and end time
+	cudaEventCreate(&start); 		// create event
+	cudaEventCreate(&stop);			// create event
+
+	cudaEventRecord(start);			// record the current time into start
+
+	// do stuff
+
+	cudaEventRecord(stop);			// record the current time into stop
+	cudaEventSynchronize(stop);		// stop all processes before reading the time(accurate)
+
+
+	cudaEventElapsedTime( &elapsedTime, start, stop); // calculate elapsed time
+	return 0;
+}
+__________________________________________________________________________________________
+
+
+Streaming:
+	Cool so we have the GPU so we can do things in parallel. Currently this does not mean it happens completely asynchronously. The GPU only runs asynchronous to its self. Currently when we call a global function, we are stopping the CPU until that function completes. This means we cannot call two global functions and have them run in parallel. Until now, we were having our parallization limitted to what we can do in one kernel call only. With streams you can do many kernels at once (or close to it). Read the book for streams. It is really helpful for understanding the basics. Here is the overview. You can associate memory transfers and kernel calls with a stream. I believe the limit to how many streams you can have is 16 or 32. I am doing 8 streams in my program RCOG. You first need to create the stream event then you can associate the function with the stream. If not associated, the said memcpy or kernel will run in the '0' stream which will stop all other streams. So it is either all synchronous or all asynchronous. By calling a memcpy and or funciton with a stream you are only requesting the work done. You (as the CPU) do not wait for the function to complete. This is why after all kernel calls before you copy your memory back to the host, you must call cudaStreamSynchronize(stream). This stops the CPU unti your GPU is finished with all the queued work. Now you can copy the memory back to the host. If you do not do this, then you get a half completed answer back from the GPU or garbage in your memory that you copied back.
+
+Examples of streams:
+__________________________________________________________________________________________
+int main()
+{
+	//other stuff
+	...
+
+	// declairing an array of cudaStream_t variables
+	cudaStream_t stream[channels]; 
+	// this loop puts in the requests for all stream work across 'channels' stream
+	for (int ch = 0; ch < channels; ch++){
+		cudaStreamCreate( &stream[ch]);
+		cudaMemcpyAsync(&d_input[ch*a+0], &h_input[ch*a+0], nT0*samp_T0*sizeof(char4), cudaMemcpyHostToDevice, stream[ch]);
+		Power_arr<<<pwrgrd,hist, 0, stream[ch]>>>(&d_input[ch*a+0], &d_m2[ch*a+0]);
+		Me_npol<<<nto,hist, 0, stream[ch]>>>(&d_m2[ch*a+0], &d_me[ch*b+0]);
+		Max_min<<<nto,hist, 0, stream[ch]>>>(&d_m2[ch*a+0], &d_ma[ch*b+0], &d_mi[ch*b+0], &d_resizer[ch*b+0]);
+		Histo_kernel<<<pwrgrd,hist, 0, stream[ch]>>>(&d_m2[ch*a+0], &d_histo[ch*c+0], &d_mi[ch*b+0], &d_resizer[ch*b+0]); 
+		Mom_order<<<nto,nmom, 0, stream[ch]>>>(&d_me[ch*b+0], &d_histo[ch*c+0], &d_mom[ch*d+0], &d_mi[ch*b+0], &d_resizer[ch*b+0]);
+		Final<<<nto,6, 0, stream[ch]>>>(&d_mom[ch*d+0], &d_rsk[ch*b+0]);
+	}
+
+	// We have to synchronize each stream to the host before memcpy back.
+	for (int ch = 0; ch < channels; ch++){
+		cudaStreamSynchronize( stream[ch]);
+		cudaMemcpyAsync(&h_me[ch*b+0], &d_me[ch*b+0], nT0*sizeof(float2), cudaMemcpyDeviceToHost, stream[ch]);
+		cudaMemcpyAsync(&h_rsk[ch*b+0], &d_rsk[ch*b+0], nT0*sizeof(struct rsk), cudaMemcpyDeviceToHost, stream[ch]);
+	}
+
+	// We have to synchronize the entire GPU with the host before using any of the memory we were copying
+	cudaDeviceSynchronize(); 
+
+	// destroy the stream events.
+	for (int ii = 0; ii < channels; ii++) cudaStreamDestroy(stream[ii]);
+
+__________________________________________________________________________________________
+	Here you can see that the kernel calls are different. All kernel calls have 4 launch parameters instead of 2 <<<pwrgrd,hist,0,stream[ch]>>>. Launch parameters are as follows. <<< blocks to launch, threads to launch, shared memory storage, stream>>> This associates a kernel launch with a stream. You can see in the function call parameters, the memory changes with the stream aswell. This is to make sure two streams are not operating on the same section of memory. This would create problems.
+
+Stream Exercise:
+__________________________________________________________________________________________
+// To test random code
+// To compile this program. In the command line type:
+// $ gcc -o testcode testcode.c -lm
+#include <math.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include "../../Cudapractice/common/book.h"
+#define UNIQ_CHBYTES 33546240 //(NDIM-OVERLAP)*NPOL
+#define CUDA_SAFE_CALL(call) \
+do { \
+    cudaError_t err = call; \
+    if (cudaSuccess != err) { \
+        fprintf (stderr, "Cuda error in file '%s' in line %i : %s.", \
+                 __FILE__, __LINE__, cudaGetErrorString(err) ); \
+        exit(EXIT_FAILURE); \
+    } \
+} while (0)
+// This program is to test multiple streams at once
+#define N 1024*1024
+#define FULL N*20
+
+__global__ void kernel1( int *a, int *b, int *c)
+{
+	int idx = threadIdx.x + (blockIdx.x * blockDim.x);
+	if (idx < N){
+		int idx1 = (idx + 1) % 256;
+		int idx2 = (idx + 2) % 256;
+		float as = (a[idx] + a[idx1] + a[idx2])/3.0f;
+		float bs = (b[idx] + b[idx1] + b[idx2])/3.0f;
+		c[idx] = (as + bs) / 2;
+	}
+}
+
+
+int main(){
+
+	cudaEvent_t start, stop;
+	float elapsedTime;
+	HANDLE_ERROR( cudaEventCreate( &start));
+	HANDLE_ERROR( cudaEventCreate( &stop));
+
+	cudaStream_t stream[2];
+	cudaStreamCreate( &stream[0] );
+	cudaStreamCreate( &stream[1] );
+
+	int *host_a, *host_b, *host_c;
+	int *dev_a0, *dev_b0, *dev_c0;
+	int *dev_a1, *dev_b1, *dev_c1;
+
+	cudaMalloc((void**)&dev_a0, N*sizeof(int));
+	cudaMalloc((void**)&dev_b0, N*sizeof(int));
+	cudaMalloc((void**)&dev_c0, N*sizeof(int));
+
+	cudaMalloc((void**)&dev_a1, N*sizeof(int));
+	cudaMalloc((void**)&dev_b1, N*sizeof(int));
+	cudaMalloc((void**)&dev_c1, N*sizeof(int));
+
+	cudaHostAlloc((void**)&host_a, FULL*sizeof(int), cudaHostAllocDefault);
+	cudaHostAlloc((void**)&host_b, FULL*sizeof(int), cudaHostAllocDefault);
+	cudaHostAlloc((void**)&host_c, FULL*sizeof(int), cudaHostAllocDefault);
+
+
+	for (int ii = 0; ii < FULL; ii++)
+	{
+		host_a[ii] = rand();
+		host_b[ii] = rand();
+	}
+
+	HANDLE_ERROR( cudaEventRecord( start,0));
+	for ( int ii = 0; ii < FULL; ii+=N*2) // 10 times
+	{
+		cudaMemcpyAsync(dev_a0, host_a+ii, N*sizeof(int), cudaMemcpyHostToDevice, stream[0]);
+		cudaMemcpyAsync(dev_b0, host_b+ii, N*sizeof(int), cudaMemcpyHostToDevice, stream[0]);
+		kernel1<<<N/256,256,0,stream[0]>>>(dev_a0, dev_b0, dev_c0);
+		cudaMemcpyAsync(host_c+ii, dev_c0, N*sizeof(int), cudaMemcpyDeviceToHost, stream[0]);
+		cudaMemcpyAsync(dev_a1, host_a+ii, N*sizeof(int), cudaMemcpyHostToDevice, stream[1]);
+		cudaMemcpyAsync(dev_b1, host_b+ii, N*sizeof(int), cudaMemcpyHostToDevice, stream[1]);
+		kernel1<<<N/256,256,0,stream[1]>>>(dev_a1, dev_b1, dev_c1);
+		cudaMemcpyAsync(host_c+ii, dev_c1, N*sizeof(int), cudaMemcpyDeviceToHost, stream[1]);
+	}
+	cudaStreamSynchronize( stream[0] );
+	cudaStreamSynchronize( stream[1] );
+	cudaEventRecord (stop,0);
+	cudaEventSynchronize(stop);
+	cudaEventElapsedTime(&elapsedTime, start, stop);
+	printf( "Time Took: %f\n", elapsedTime);
+
+	cudaFreeHost(host_a);
+	cudaFreeHost(host_a);
+	cudaFreeHost(host_a);
+	cudaFree(dev_a0);
+	cudaFree(dev_b0);
+	cudaFree(dev_c0);
+	cudaFree(dev_a1);
+	cudaFree(dev_b1);
+	cudaFree(dev_c1);
+	cudaStreamDestroy(*stream);
+
+	return 0;
+}
+__________________________________________________________________________________________
+
+
+Device Limitations: 
+	There are some hardware limitation to what your GPU can do. Most can be found on page # 31-33.
+
+
+
+			 	Explaination, diagnosis, and criticism of RCOG:
+
+
+	This program runs in under 2 minutes. All memory used is allocated and freed in the main before / after the loop. This ensures that memory does not become compounded if reallocated. This also prevents fragmentation. Similarly, the outfiles and infiles are opened and closed in main outside of the loop. All host memory is page locked because streaming is asynchronous and only works with page locked memory. The stats take 3 time longer than the spectrogram. There is room for speed improvement in both. Speed improvements are noted in the comments in each file. One downside is that only 8 streams and under have been tested at once. For 16 channels, 16 streams would be logical, and it may actually work. 32 streams may work. At some point in the low powers of 2, a limit to how many streams can be active at once occurs. Read documentation for this. 
+	This has only been tested on GUPPI format data not Vegas format data. However, when designing this program, I structured the memory so vegas format data will easily slide into place here with the packet format. Actaully 8 cariable of h_input instead of one may be faster, or it may not. This program used with VEGAS is intended to collect only 8 channels at once. I am not sure how well this program will stream inside VEGAS. When implemented for VEGAS, the name should be changed from RCOG to RCOV and rcog_read_gupp.cu should be removed.
+	RCOG should be tested to see if the time resolution can be changed without messing up the program. Only some minor calculation manipulation is needed if any at all! 
+
+
+
+
+						Next Stage of Project:
+
+
+
+	The next stage would be to get some raw VEGAS data written to disk with RFI in the data so RCOV can be tested with that. Then the VEGAS packet format reading can be timestamped. From there, a method of streamming data from VEGAS to RCOV and then back to VEGAS needs to be determined. Lastly, the statistics should result in some sort of flag value. Determine how VEGAS is going to use this flag value to replace RFI with 'nan's so that it will not blind the averaging process. 
+
+
+
+
+
+
+
+						Potential Improvements:
+
+
+	The key word here is potential. Memory transfer speed improvements. Unified memory for somethings? More atomic operations. Is there any memory that should be part of a struct instead of array? What about the other way around? Are streams necessary? Does this program really need to accumulate 1 gigabyte of memory before operating on it?
+	Aside from reading and writing the raw data, the statistics part of the program is the slowest part of the process. If this can be sped up that would be great. A oneline algorythm instead of the histogramming method may be better. It certainly would be interesting to see how the two methods would compare to eachother. 
+	Right now, the statistics are calculated across all frequencies in one sub band per averaged time interval. This gives a flag value only in the time domain. If you calculated statistics after the fft was performed, then you may be able to calculate statistics in both the frequency domain and the time domain that would give us pixel resolution with our flags. This way, when you found the RFI, you would not need to take out all frequencies of a given averaged time sample.
+	Perhaps the Min, Max, and resizing is not needed which means that the code would turn from a three pass(Pass 1: mean, min, max, and resizer; Pass 2: histogram; Pass 3: calculating moments) to a two pass (Pass 1: mean and histogram; Pass 2: calculating moments). 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
